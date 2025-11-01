@@ -34,7 +34,7 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5500",   # VS Code Live Server
         "http://localhost:5500",
-        "https://your-widget-demo.vercel.app",  # after deploy
+        "https://real-estate-price-widget.vercel.app/",  # after deploy
         "https://your-client-site.com",
     ],
     allow_credentials=True,
