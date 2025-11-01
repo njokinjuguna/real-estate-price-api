@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:15
+    container_name: db-1
+    environment:
+      POSTGRES_DB: priceapi
+      POSTGRES_USER: priceapi
+      POSTGRES_PASSWORD: priceapi
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U priceapi -d priceapi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  price-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      # Defaults if REDIS_URL/API_KEY aren't in .env
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: priceapi
+      DB_USER: priceapi
+      DB_PASS: priceapi
+      API_KEY: ${API_KEY:-changeme-in-dev}
+      MODEL_PATH: model/pipeline.joblib
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  pgdata:
