@@ -1,47 +1,58 @@
-# app/db.py
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.engine import URL
 
 from app.models import Base
 
+def _safe_int(v):
+    try:
+        return int(v) if v not in (None, "", "None") else None
+    except Exception:
+        return None
 
-def _build_default_pg_url() -> str:
-    """Build a Postgres URL from the existing split env vars (your current behavior)."""
-    user = os.getenv("DB_USER").strip()
-    pwd  = os.getenv("DB_PASS").strip()
-    host = os.getenv("DB_HOST").strip()
-    port = os.getenv("DB_PORT").strip()
-    name = os.getenv("DB_NAME").strip()
-    return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{name}"
+def build_database_url() -> str | URL:
+    # Prefer a full DATABASE_URL if present (Koyeb/Render/Railway style)
+    raw = os.getenv("DATABASE_URL", "").strip()
+    if raw:
+        # Normalize scheme for SQLAlchemy + psycopg2
+        if raw.startswith("postgres://"):
+            raw = raw.replace("postgres://", "postgresql+psycopg2://", 1)
+        elif raw.startswith("postgresql://") and "postgresql+psycopg2://" not in raw:
+            raw = raw.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return raw
 
+    user = os.getenv("DB_USER", "priceapi").strip()
+    pwd  = os.getenv("DB_PASS", "priceapi").strip()
+    host = os.getenv("DB_HOST", "localhost").strip()
+    db   = os.getenv("DB_NAME", "priceapi").strip()
+    port = _safe_int(os.getenv("DB_PORT", "5433").strip())
 
-# Prefer DATABASE_URL if provided (works for SQLite or Postgres); otherwise use split vars.
-DATABASE_URL = (os.getenv("DATABASE_URL") or _build_default_pg_url()).strip()
+    # Build via URL.create so we don't accidentally put ':None' in the string
+    return URL.create(
+        drivername="postgresql+psycopg2",
+        username=user,
+        password=pwd,
+        host=host,
+        port=port,       # None is OK, it will omit the port
+        database=db,
+    )
 
-# Engine kwargs:
-# - pool_pre_ping=True avoids broken-connection errors on serverless/idle resumes.
-# - NullPool is a good default on ephemeral platforms (Koyeb/Render) to avoid keeping idle conns.
-engine_kwargs = dict(pool_pre_ping=True, poolclass=NullPool, future=True)
+DATABASE_URL = build_database_url()
 
-# SQLite needs a tiny tweak for multithreaded FastAPI.
-if DATABASE_URL.startswith("sqlite"):
-    # Example: sqlite:////data/app.db
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+# Engine options (no connection pool is fine for serverless; tweak as you like)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    future=True,
+)
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
-
-def init_db() -> None:
-    """Create tables if they don't exist."""
+def init_db():
     Base.metadata.create_all(bind=engine)
 
-
 def get_session():
-    """FastAPI dependency: provide a scoped DB session."""
     db = SessionLocal()
     try:
         yield db
